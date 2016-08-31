@@ -44,6 +44,7 @@ Export-ModuleMember `
         'Start-SshAgent',
         'Stop-SshAgent',
         'Add-SshKey',
+        'New-SshKey',
         'Get-SshPath',
         'Update-AllBranches',
         'tgit')

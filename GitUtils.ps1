@@ -287,6 +287,9 @@ function Find-Pageant() {
 
 # Attempt to guess $program's location. For ssh-agent/ssh-add.
 function Find-Ssh($program = 'ssh-agent') {
+    $sshLocation = Get-Command $program -TotalCount 1 -ErrorAction Continue
+    if($sshLocation) { return $sshLocation }
+
     Write-Verbose "$program not in path. Trying to guess location."
     $gitItem = Get-Command git -Erroraction SilentlyContinue | Get-Item
     if ($gitItem -eq $null) { Write-Warning 'git not in path'; return }
@@ -317,8 +320,7 @@ function Start-SshAgent([switch]$Quiet) {
         if (!$pageant) { Write-Warning "Could not find Pageant."; return }
         Start-Process -NoNewWindow $pageant
     } else {
-        $sshAgent = Get-Command ssh-agent -TotalCount 1 -ErrorAction SilentlyContinue
-        $sshAgent = if ($sshAgent) {$sshAgent} else {Find-Ssh('ssh-agent')}
+        $sshAgent = Find-Ssh 'ssh-agent'
         if (!$sshAgent) { Write-Warning 'Could not find ssh-agent'; return }
 
         & $sshAgent | foreach {
@@ -334,6 +336,111 @@ function Get-SshPath($File = 'id_rsa')
 {
     $home = Resolve-Path (Invoke-NullCoalescing $Env:HOME ~)
     Resolve-Path (Join-Path $home ".ssh\$File") -ErrorAction SilentlyContinue 2> $null
+}
+
+function ConvertTo-UnixPath($Path)
+{
+    Write-Output ('/' + (Resolve-Path $Path).Path.Replace('\', '/').Remove(1, 1))
+}
+
+function ConvertFrom-UnixPath($Path)
+{
+    Write-Output $Path.Replace('/', '\').Substring(1).Insert(1, ':')
+}
+
+<#
+#>
+function New-SshKey
+{
+    param(
+        [Parameter()]
+        [string]
+        $Name,
+
+        [Parameter()]
+        [ValidateSet('dsa', 'ecdsa', 'ed25519', 'rsa', 'rsa1')]
+        [string]
+        $Type = 'rsa',
+
+        [Parameter()]
+        [int]
+        $Bits = 4096,
+
+        [Parameter()]
+        [ValidateNotNullOrEmpty()]
+        [string]
+        $Directory = "~/.ssh",
+
+        [Parameter()]
+        [string]
+        $Comment,
+
+        [Parameter()]
+        [string]
+        $Password = ''
+    )
+
+    if(!$Name) { $Name = "id_$Type" }
+
+    $SshKeyGen = Find-Ssh 'ssh-keygen'
+
+    if(!$SshKeyGen) { Write-Error 'Could not find ssh-keyngen' -ErrorAction Stop }
+
+    if(!(Test-Path $Directory)) { mkdir -Force $Directory -ErrorAction Stop | Out-Null }
+
+    $Path = Join-Path $Directory $Name
+    if(Test-Path $Path) { Write-Error "A key with that name already exists: $Path" -ErrorAction Stop }
+
+    $Directory = ConvertTo-UnixPath $Directory
+    $Path = "$Directory/$Name"
+
+    $Params = @('-b', $Bits, '-t', $Type, '-f', "'$Path'", '-N', "'$Password'")
+
+    if($Comment) { $Params += @('-C', "'$Comment'") }
+
+    $Output = & $SshKeyGen $Params | Out-String
+
+    if($LASTEXITCODE)
+    {
+        Write-Error "Calling ssh-keygen failed with error code: $LASTEXITCODE`nOutput:`n`t$Output" -ErrorAction Stop
+    }
+
+    if($Output -match "Your identification has been saved in (?<Private>.*)\.")
+    {
+        $PrivatePath = ConvertFrom-UnixPath $Matches['Private']
+    }
+    else
+    {
+        Write-Warning "Can't parse ssh-keygen output for the private key path"
+    }
+
+    if($Output -match "Your public key has been saved in (?<Public>.*)\.\s")
+    {
+        $PublicPath = ConvertFrom-UnixPath $Matches['Public']
+    }
+    else
+    {
+        Write-Warning "Can't parse ssh-keygen output for the public key path"
+    }
+
+    if($Output -match "(?<Hash>[A-Z0-9]+)?:(?<Fingerprint>\S+)\s+(?<Comment>.*)?(\n|\r)")
+    {
+        $Hash = $Matches['Hash']
+        $Fingerprint = $Matches['Fingerprint']
+        $Comment = $Matches['Comment']
+    }
+    else
+    {
+        Write-Warning "Can't parse ssh-keygen output for the key fingerprint"
+    }
+
+    New-Object PSObject -Property @{
+        Type = $Type
+        PublicKey = $PublicPath;
+        PrivateKey = $PrivatePath;
+        Fingerprint = $Fingerprint;
+        Hash = $Hash;
+        Comment = $Comment} | Write-Output
 }
 
 # Add a key to the SSH agent
@@ -354,8 +461,7 @@ function Add-SshKey() {
             }
         }
     } else {
-        $sshAdd = Get-Command ssh-add -TotalCount 1 -ErrorAction SilentlyContinue
-        $sshAdd = if ($sshAdd) {$sshAdd} else {Find-Ssh('ssh-add')}
+        $sshAdd = Find-Ssh 'ssh-add'
         if (!$sshAdd) { Write-Warning 'Could not find ssh-add'; return }
 
         if ($args.Count -eq 0) {
