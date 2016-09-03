@@ -49,3 +49,51 @@ function ParseGitCommandHelpMessage($Command)
     }
 }
 
+function ParseGitCommandSubCommands($Command)
+{
+    Begin
+    {
+        $PrefixRegex = "^(?:usage:|   or:) git $Command"
+        $SubCommandRegex = "(?<SubCommand>[a-z\-]+)"
+        $ArgumentRegex = "(<(?<Argument>[^>]+)>)"
+
+        $ParamOpenRegex = "(?:\[|\()"
+        $ParameterRegex = "($ParamOpenRegex(?<Parameters>.*)(?:\]|\)))"
+
+        $Regex = [regex]"$PrefixRegex(?: (?:$SubCommandRegex|$ParameterRegex|$ArgumentRegex))+$"
+    }
+
+    Process
+    {
+        $HelpMessage = git $Command -h 2| Write-Output
+        $SubCommands = @()
+
+        foreach($l in $HelpMessage)
+        {
+            $m = $Regex.Match($l)
+            if($m.Success)
+            {
+                Write-Debug "Found a success with line: $l"
+                if($m.Groups['SubCommand'].Success)
+                {
+                    $SubCommand = $m.Groups['SubCommand'].Value
+                    Write-Debug "Found subcommand:$SubCommand"
+                    $SubCommands += New-Object PSObject -Property `
+                        @{
+                            Subcommand = $SubCommand;
+                            Arguments = $m.Groups['Argument'].Captures | Select-Object -Expand Value;
+                            Parameters = $m.Groups['Parameters'].Captures | Select-Object -Expand Value;
+                        }
+                }
+            }
+            else
+            {
+                Write-Debug "Stopped matching with line: $l"
+                break;
+            }
+        }
+
+        Write-Output $SubCommands
+    }
+}
+
