@@ -49,18 +49,39 @@ function ParseGitCommandHelpMessage($Command)
     }
 }
 
+function ParseGitParametersAndCommands
+{
+    Begin
+    {
+        $PrefixRegex = "^(?:usage: git|         )"
+        $ArgumentRegex = "(?:<(?<Argument>[^>]+)>)"
+
+        $ParamOpenRegex = "(?:\[|\()"
+        $ParamCloseRegex = "(?:\]|\))"
+        $ParameterRegex = "(?:$ParamOpenRegex(?<Parameters>[^\]\)]+)$ParamCloseRegex)"
+
+        $Regex = [regex]"$PrefixRegex(?: (?:$SubCommandRegex|$ParameterRegex|$ArgumentRegex))+$"
+    }
+}
+
+<#
+# TODO: Assumes that parameters are in brackets, and subcommands are not.
+#   Should change for having a difference between mandatory parameters,
+#   and subcommands. an example is git remote set-url
+#>
 function ParseGitCommandSubCommands($Command)
 {
     Begin
     {
         $PrefixRegex = "^(?:usage:|   or:) git $Command"
-        $SubCommandRegex = "(?<SubCommand>[a-z\-]+)"
+        $SubCommandRegex = "(?<SubCommand>[a-z][a-z\-]+)"
         $ArgumentRegex = "(<(?<Argument>[^>]+)>)"
 
         $ParamOpenRegex = "(?:\[|\()"
-        $ParameterRegex = "($ParamOpenRegex(?<Parameters>.*)(?:\]|\)))"
+        $ParamCloseRegex = "(?:\]|\))"
+        $ParameterRegex = "(?:$ParamOpenRegex(?<Parameters>[^\]\)]+)$ParamCloseRegex)"
 
-        $Regex = [regex]"$PrefixRegex(?: (?:$SubCommandRegex|$ParameterRegex|$ArgumentRegex))+$"
+        $Regex = [regex]"$PrefixRegex(?: (?:$SubCommandRegex|$ParameterRegex|$ArgumentRegex))+"
     }
 
     Process
